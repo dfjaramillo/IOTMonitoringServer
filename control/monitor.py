@@ -1,6 +1,7 @@
 from argparse import ArgumentError
 import ssl
 from django.db.models import Avg
+from django.utils import timezone
 from datetime import timedelta, datetime
 from receiver.models import Data, Measurement
 import paho.mqtt.client as mqtt
@@ -8,7 +9,7 @@ import schedule
 import time
 from django.conf import settings
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, settings.MQTT_USER_PUB)
+client = None
 
 
 def analyze_data():
@@ -19,7 +20,7 @@ def analyze_data():
     print("Calculando alertas...")
 
     data = Data.objects.filter(
-        base_time__gte=datetime.now() - timedelta(hours=1))
+        base_time__gte=timezone.now() - timedelta(hours=1))
     aggregation = data.annotate(check_value=Avg('avg_value')) \
         .select_related('station', 'measurement') \
         .select_related('station__user', 'station__location') \
@@ -37,8 +38,15 @@ def analyze_data():
         alert = False
 
         variable = item["measurement__name"]
-        max_value = item["measurement__max_value"] or 0
-        min_value = item["measurement__min_value"] or 0
+        max_value = item["measurement__max_value"]
+        min_value = item["measurement__min_value"]
+
+        # Si no hay límites configurados, no se puede evaluar alerta
+        if max_value is None and min_value is None:
+            continue
+
+        max_value = max_value or 0
+        min_value = min_value or 0
 
         country = item['station__location__country__name']
         state = item['station__location__state__name']
@@ -51,7 +59,7 @@ def analyze_data():
         if alert:
             message = "ALERT {} {} {}".format(variable, min_value, max_value)
             topic = '{}/{}/{}/{}/in'.format(country, state, city, user)
-            print(datetime.now(), "Sending alert to {} {}".format(topic, variable))
+            print(timezone.now(), "Sending alert to {} {}".format(topic, variable))
             client.publish(topic, message)
             alerts += 1
 
