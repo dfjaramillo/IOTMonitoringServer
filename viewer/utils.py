@@ -1,5 +1,6 @@
 from datetime import datetime
 import traceback
+from django.utils import timezone
 from django.contrib.auth.models import User
 from receiver.models import Measurement, Station, Data, Location, City, State, Country
 from django.db.models import Avg, Max, Min, Sum
@@ -13,7 +14,7 @@ def get_measurements():
 
 def get_last_week_data(user, city, state, country):
     result = {}
-    start = datetime.now()
+    start = timezone.now()
     start = start - dateutil.relativedelta.relativedelta(days=1)
     try:
         userO = User.objects.get(username=user)
@@ -61,9 +62,11 @@ def get_last_week_data(user, city, state, country):
 
             minVal = raw_data.aggregate(Min("min_value"))["min_value__min"]
             maxVal = raw_data.aggregate(Max("max_value"))["max_value__max"]
-            avgVal = sum(reg.avg_value * reg.length for reg in raw_data) / sum(
-                reg.length for reg in raw_data
-            )
+            total_length = sum(reg.length for reg in raw_data)
+            if total_length > 0:
+                avgVal = sum(reg.avg_value * reg.length for reg in raw_data) / total_length
+            else:
+                avgVal = 0
             result[measure.name] = {
                 "min": minVal if minVal != None else 0,
                 "max": maxVal if maxVal != None else 0,
