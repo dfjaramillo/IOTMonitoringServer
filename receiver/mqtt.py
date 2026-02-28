@@ -63,19 +63,28 @@ def on_disconnect(client: mqtt.Client, userdata, rc):
     client.reconnect()
 
 
-print("Iniciando cliente MQTT...", settings.MQTT_HOST, settings.MQTT_PORT)
-try:
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, settings.MQTT_USER)
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.on_disconnect = on_disconnect
+client = None
 
-    if settings.MQTT_USE_TLS:
-        client.tls_set(ca_certs=settings.CA_CRT_PATH,
-                       tls_version=ssl.PROTOCOL_TLSv1_2, cert_reqs=ssl.CERT_NONE)
 
-    client.username_pw_set(settings.MQTT_USER, settings.MQTT_PASSWORD)
-    client.connect(settings.MQTT_HOST, settings.MQTT_PORT)
+def setup():
+    '''
+    Configura y conecta el cliente MQTT.
+    Solo se debe llamar desde el comando start_mqtt.
+    '''
+    global client
+    print("Iniciando cliente MQTT...", settings.MQTT_HOST, settings.MQTT_PORT)
+    try:
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, settings.MQTT_USER)
+        client.on_connect = on_connect
+        client.on_message = on_message
+        client.on_disconnect = on_disconnect
 
-except Exception as e:
-    print('Ocurrió un error al conectar con el bróker MQTT:', e)
+        if settings.MQTT_USE_TLS:
+            client.tls_set(ca_certs=settings.CA_CRT_PATH,
+                           tls_version=ssl.PROTOCOL_TLSv1_2, cert_reqs=ssl.CERT_NONE)
+
+        client.username_pw_set(settings.MQTT_USER, settings.MQTT_PASSWORD)
+        client.connect(settings.MQTT_HOST, settings.MQTT_PORT)
+
+    except Exception as e:
+        print('Ocurrió un error al conectar con el bróker MQTT:', e)

@@ -6,4 +6,5 @@ class Command(BaseCommand):
     help = 'Starts MQTT suscription'
 
     def handle(self, *args, **kwargs):
+        mqtt.setup()
         mqtt.client.loop_forever()
