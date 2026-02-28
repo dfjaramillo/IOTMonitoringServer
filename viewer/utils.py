@@ -44,7 +44,7 @@ def get_last_week_data(user, city, state, country):
             start_ts = int(start.timestamp() * 1000000)
             raw_data = Data.objects.filter(
                 station=stationO, time__gte=start_ts, measurement=measure
-            ).order_by("-base_time")[:2]
+            ).order_by("base_time")[:2]
             print("LAST_WEEK: Raw data: ", len(raw_data))
             data = []
             for reg in raw_data:
@@ -59,6 +59,7 @@ def get_last_week_data(user, city, state, country):
                             values[i],
                         )
                     )
+            data.sort(key=lambda x: x[0])
 
             minVal = raw_data.aggregate(Min("min_value"))["min_value__min"]
             maxVal = raw_data.aggregate(Max("max_value"))["max_value__max"]
