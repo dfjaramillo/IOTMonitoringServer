@@ -103,6 +103,7 @@ def setup_mqtt():
         client.username_pw_set(settings.MQTT_USER_PUB,
                                settings.MQTT_PASSWORD_PUB)
         client.connect(settings.MQTT_HOST, settings.MQTT_PORT)
+        client.loop_start()
 
     except Exception as e:
         print('Ocurrió un error al conectar con el bróker MQTT:', e)
