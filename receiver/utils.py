@@ -24,12 +24,16 @@ def get_coordinates(city: str, state: str, country: str) -> Tuple[float, float]:
     country = ' '.join(country.split('+'))
     url = f'https://geocode.xyz/{city},{state},{country}?json=1'
 
-    r = requests.get(url)
-    if r.status_code == 200:
-        lat = r.json().get('latt', 0)
-        lng = r.json().get('longt', 0)
-        lat = float(lat)
-        lng = float(lng)
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            lat = data.get('latt', 0)
+            lng = data.get('longt', 0)
+            lat = float(lat)
+            lng = float(lng)
+    except (requests.exceptions.RequestException, ValueError, TypeError) as e:
+        print(f'Error obteniendo coordenadas para {city}, {state}, {country}: {e}')
     return lat, lng
 
 
@@ -110,13 +114,15 @@ def create_data(
     value: float,
     station: Station,
     measure: Measurement,
-    time: datetime = datetime.now(),
+    time: datetime = None,
 ):
     '''
     Crea un nuevo dato con valor {value}, estación {station} y variable {measure}.
     Hace las operaciones necesarias para insertarlo en la base de datos con el patrón Blob.
     Calcula promedio, mínimo y máximo de los datos anteriores.
     '''
+    if time is None:
+        time = timezone.now()
 
     base_time = datetime(time.year, time.month, time.day,
                          time.hour, tzinfo=time.tzinfo)
