@@ -67,6 +67,93 @@ def analyze_data():
     print(alerts, "alertas enviadas")
 
 
+def analyze_humidity_event():
+    """
+    Nuevo evento de humedad: Evalúa la humedad promedio de la última hora.
+
+    Pre-requisito (consulta a la BD):
+        Se consulta la tabla Data filtrando por measurement.name == 'humedad'
+        en la última hora, agrupando por estación, y se calcula el promedio
+        (humedad_promedio) mediante una agregación Avg sobre avg_value.
+
+    Condición:
+        Si humedad_promedio > max_value o humedad_promedio < min_value
+        (umbrales configurados en la tabla Measurement para 'humedad'),
+        se considera que hay una alerta.
+
+    Acción:
+        Se envía un mensaje MQTT "HUMIDITY_ALERT ON <promedio> <min> <max>"
+        al dispositivo IoT. El MCU interpreta este comando y activa un pin
+        GPIO que habilita un circuito oscilador NE555 conectado a dos LEDs,
+        haciendo que parpadeen de forma alternada como indicador visual.
+        Cuando la condición deja de cumplirse, se envía "HUMIDITY_ALERT OFF"
+        para desactivar el oscilador.
+    """
+    print("Evaluando evento de humedad...")
+
+    # Pre-requisito: Verificar que existe la variable 'humedad' en la BD
+    humidity_measurements = Measurement.objects.filter(name__iexact='humedad')
+
+    if not humidity_measurements.exists():
+        print("No se encontró la variable 'humedad' en la base de datos.")
+        return
+
+    # Consulta a la BD: Obtener humedad promedio de la última hora por estación
+    humidity_data = Data.objects.filter(
+        base_time__gte=timezone.now() - timedelta(hours=1),
+        measurement__in=humidity_measurements
+    ).select_related(
+        'station', 'measurement',
+        'station__user', 'station__location',
+        'station__location__city', 'station__location__state',
+        'station__location__country'
+    ).values(
+        'station__user__username',
+        'station__location__city__name',
+        'station__location__state__name',
+        'station__location__country__name',
+        'measurement__min_value',
+        'measurement__max_value',
+    ).annotate(humedad_promedio=Avg('avg_value'))
+
+    alerts = 0
+    for item in humidity_data:
+        humedad_promedio = item['humedad_promedio']
+        max_value = item['measurement__max_value']
+        min_value = item['measurement__min_value']
+
+        # Si no hay umbrales configurados, no se evalúa
+        if max_value is None and min_value is None:
+            continue
+
+        max_value = max_value if max_value is not None else 100.0
+        min_value = min_value if min_value is not None else 0.0
+
+        country = item['station__location__country__name']
+        state = item['station__location__state__name']
+        city = item['station__location__city__name']
+        user = item['station__user__username']
+        topic = '{}/{}/{}/{}/in'.format(country, state, city, user)
+
+        # Condición: humedad promedio fuera de rango
+        if humedad_promedio > max_value or humedad_promedio < min_value:
+            message = "HUMIDITY_ALERT ON {:.1f} {:.1f} {:.1f}".format(
+                humedad_promedio, min_value, max_value)
+            print(timezone.now(),
+                  "Alerta de humedad -> {} | Promedio: {:.1f}%".format(
+                      topic, humedad_promedio))
+            client.publish(topic, message)
+            alerts += 1
+        else:
+            # Desactivar el oscilador si la humedad está en rango normal
+            message = "HUMIDITY_ALERT OFF {:.1f}".format(humedad_promedio)
+            client.publish(topic, message)
+
+    print("{} estaciones evaluadas para evento de humedad".format(
+        len(humidity_data)))
+    print("{} alertas de humedad enviadas".format(alerts))
+
+
 def on_connect(client, userdata, flags, rc):
     '''
     Función que se ejecuta cuando se conecta al bróker.
@@ -111,11 +198,13 @@ def setup_mqtt():
 
 def start_cron():
     '''
-    Inicia el cron que se encarga de ejecutar la función analyze_data cada 5 minutos.
+    Inicia el cron que se encarga de ejecutar la función analyze_data cada 5 minutos
+    y la función analyze_humidity_event cada 5 minutos.
     '''
     print("Iniciando cron...")
     schedule.every(5).minutes.do(analyze_data)
-    print("Servicio de control iniciado")
+    schedule.every(5).minutes.do(analyze_humidity_event)
+    print("Servicio de control iniciado (alertas generales + evento de humedad)")
     while 1:
         schedule.run_pending()
         time.sleep(1)

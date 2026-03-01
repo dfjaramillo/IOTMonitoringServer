@@ -16,13 +16,15 @@
 // Alto de la pantalla (en pixeles)
 #define SCREEN_HEIGHT 64
 // Pin del sensor de temperatura y humedad
-#define DHTPIN 16  // D0 (GPIO16)
+#define DHTPIN 5 // D1 (GPIO5)
 // Tipo de sensor de temperatura y humedad
 #define DHTTYPE DHT11
 // Intervalo en segundos de las mediciones
 #define MEASURE_INTERVAL 2
 // Duración aproximada en la pantalla de las alertas que se reciban
 #define ALERT_DURATION 60
+// Pin de control del circuito oscilador NE555 (activa/desactiva LEDs alternados)
+#define NE555_CTRL_PIN 4 // D2 (GPIO4) - Conectado al pin RESET (pin 4) del NE555
 
 // Pines del display SPI
 #define OLED_MOSI  13  // D7 - SDA del display
@@ -52,7 +54,7 @@ const char pass[] = "Isaac2023";
 
 // Conexión a Mosquitto
 #define USER "user1"
-const char MQTT_HOST[] = "54.159.84.126";
+const char MQTT_HOST[] = "34.238.38.186";
 const int MQTT_PORT = 8082;
 const char MQTT_CLIENT_ID[] = "MCU_user1";  // Client ID único para este dispositivo
 const char MQTT_USER[] = "user1";
@@ -69,6 +71,10 @@ long long int alertTime = millis();
 String alert = "";
 float temp;
 float humi;
+
+// Variables para alerta de humedad y control del NE555
+bool humidityAlertActive = false;
+String humidityAlertMsg = "";
 
 /**
  * Conecta el dispositivo con el bróker MQTT.
@@ -109,36 +115,31 @@ void sendSensorData(float temperatura, float humedad) {
 }
 
 /**
- * Lee la temperatura del sensor DHT.
- * Si el sensor falla, retorna un valor simulado.
+ * Lee la temperatura del sensor DHT, la imprime en consola y la devuelve.
  */
 float readTemperatura() {
+  
+  // Se lee la temperatura en grados centígrados (por defecto)
   float t = dht.readTemperature();
-  if (isnan(t)) {
-    t = random(200, 350) / 10.0;  // Simulado entre 20.0 y 35.0 °C
-    Serial.print("Temperatura (simulada): ");
-  } else {
-    Serial.print("Temperatura: ");
-  }
+  
+  Serial.print("Temperatura: ");
   Serial.print(t);
   Serial.println(" *C ");
+  
   return t;
 }
 
 /**
- * Lee la humedad del sensor DHT.
- * Si el sensor falla, retorna un valor simulado.
+ * Lee la humedad del sensor DHT, la imprime en consola y la devuelve.
  */
 float readHumedad() {
+  // Se lee la humedad relativa
   float h = dht.readHumidity();
-  if (isnan(h)) {
-    h = random(400, 800) / 10.0;  // Simulado entre 40.0 y 80.0 %
-    Serial.print("Humedad (simulada): ");
-  } else {
-    Serial.print("Humedad: ");
-  }
+  
+  Serial.print("Humedad: ");
   Serial.print(h);
   Serial.println(" %\t");
+
   return h;
 }
 
@@ -253,9 +254,28 @@ void receivedCallback(char* topic, byte* payload, unsigned int length) {
   for (int i = 0; i < length; i++) {
     data += String((char)payload[i]);
   }
-  Serial.print(data);
-  if (data.indexOf("ALERT") >= 0) {
+  Serial.println(data);
+
+  // Procesar alerta específica de humedad (controla el oscilador NE555)
+  if (data.indexOf("HUMIDITY_ALERT") >= 0) {
+    if (data.indexOf("HUMIDITY_ALERT ON") >= 0) {
+      humidityAlertActive = true;
+      humidityAlertMsg = data.substring(18); // Extraer datos después de "HUMIDITY_ALERT ON "
+      digitalWrite(NE555_CTRL_PIN, HIGH);     // Activar oscilador NE555 -> LEDs parpadean alternados
+      Serial.println("NE555 ACTIVADO - Alerta de humedad");
+    } else if (data.indexOf("HUMIDITY_ALERT OFF") >= 0) {
+      humidityAlertActive = false;
+      humidityAlertMsg = "";
+      digitalWrite(NE555_CTRL_PIN, LOW);      // Desactivar oscilador NE555 -> LEDs apagados
+      Serial.println("NE555 DESACTIVADO - Humedad normal");
+    }
     alert = data;
+    alertTime = millis();
+  }
+  // Procesar alertas genéricas (temperatura, etc.)
+  else if (data.indexOf("ALERT") >= 0) {
+    alert = data;
+    alertTime = millis();
   }
 }
 
@@ -377,6 +397,10 @@ void setup() {
   Serial.begin(115200);
   randomSeed(analogRead(0));  // Semilla para datos simulados
 
+  // Configurar pin de control del NE555 como salida (inicia apagado)
+  pinMode(NE555_CTRL_PIN, OUTPUT);
+  digitalWrite(NE555_CTRL_PIN, LOW);
+
   listWiFiNetworks();
   startDisplay();
   displayConnecting(ssid);
@@ -396,5 +420,12 @@ void loop() {
   displayHeader();
   displayMeasures();
   displayMessage(message);
+
+  // Mostrar estado del oscilador NE555 en la pantalla
+  if (humidityAlertActive) {
+    display.setTextSize(1);
+    display.println("[!] HUM ALERT - LEDs");
+  }
+
   display.display();
 }
