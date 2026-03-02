@@ -25,6 +25,8 @@
 #define ALERT_DURATION 60
 // Pin de control del circuito oscilador NE555 (activa/desactiva LEDs alternados)
 #define NE555_CTRL_PIN 4 // D2 (GPIO4) - Conectado al pin RESET (pin 4) del NE555
+// Pin analógico para la fotocelda (LDR)
+#define LDR_PIN A0 // A0 - único pin analógico del ESP8266
 
 // Pines del display SPI
 #define OLED_MOSI  13  // D7 - SDA del display
@@ -54,7 +56,7 @@ const char pass[] = "Isaac2023";
 
 // Conexión a Mosquitto
 #define USER "user1"
-const char MQTT_HOST[] = "34.238.38.186";
+const char MQTT_HOST[] = "44.203.64.31";
 const int MQTT_PORT = 8082;
 const char MQTT_CLIENT_ID[] = "MCU_user1";  // Client ID único para este dispositivo
 const char MQTT_USER[] = "user1";
@@ -71,10 +73,11 @@ long long int alertTime = millis();
 String alert = "";
 float temp;
 float humi;
+float lumi; // Valor de luminosidad (0-1024)
 
-// Variables para alerta de humedad y control del NE555
-bool humidityAlertActive = false;
-String humidityAlertMsg = "";
+// Variables para alerta de luminosidad y control del NE555
+bool luminosityAlertActive = false;
+String luminosityAlertMsg = "";
 
 /**
  * Conecta el dispositivo con el bróker MQTT.
@@ -101,17 +104,18 @@ void mqtt_connect()
 }
 
 /**
- * Publica la temperatura y humedad al tópico configurado.
+ * Publica la temperatura, humedad y luminosidad al tópico configurado.
  */
-void sendSensorData(float temperatura, float humedad) {
+void sendSensorData(float temperatura, float humedad, float luminosidad) {
   String data = "{";
   data += "\"temperatura\": "+ String(temperatura, 1) +", ";
-  data += "\"humedad\": "+ String(humedad, 1);
+  data += "\"humedad\": "+ String(humedad, 1) +", ";
+  data += "\"luminosidad\": "+ String(luminosidad, 1);
   data += "}";
   char payload[data.length()+1];
   data.toCharArray(payload,data.length()+1);
   client.publish(MQTT_TOPIC_PUB, payload);
-  Serial.print("datos enviados");
+  Serial.println("datos enviados");
 }
 
 /**
@@ -141,6 +145,21 @@ float readHumedad() {
   Serial.println(" %\t");
 
   return h;
+}
+
+/**
+ * Lee la luminosidad desde la fotocelda (LDR) conectada al pin A0.
+ * Retorna un valor entre 0 (baja luminosidad) y 100 (alta luminosidad).
+ */
+float readLuminosidad() {
+  int raw = analogRead(LDR_PIN);
+  float l = (raw / 1024.0) * 100.0;
+
+  Serial.print("Luminosidad: ");
+  Serial.print(l, 1);
+  Serial.println(" %");
+
+  return l;
 }
 
 /**
@@ -194,12 +213,14 @@ void displayHeader() {
  */
 void displayMeasures() {
   display.println("");
-  display.print("T: ");
-  display.print(temp);
-  display.print("    ");
-  display.print("H: ");
-  display.print(humi);
+  display.print("T:");
+  display.print(temp, 1);
+  display.print(" H:");
+  display.print(humi, 1);
   display.println("");
+  display.print("L: ");
+  display.print(lumi, 1);
+  display.println(" %");
 }
 
 /**
@@ -256,18 +277,18 @@ void receivedCallback(char* topic, byte* payload, unsigned int length) {
   }
   Serial.println(data);
 
-  // Procesar alerta específica de humedad (controla el oscilador NE555)
-  if (data.indexOf("HUMIDITY_ALERT") >= 0) {
-    if (data.indexOf("HUMIDITY_ALERT ON") >= 0) {
-      humidityAlertActive = true;
-      humidityAlertMsg = data.substring(18); // Extraer datos después de "HUMIDITY_ALERT ON "
-      digitalWrite(NE555_CTRL_PIN, HIGH);     // Activar oscilador NE555 -> LEDs parpadean alternados
-      Serial.println("NE555 ACTIVADO - Alerta de humedad");
-    } else if (data.indexOf("HUMIDITY_ALERT OFF") >= 0) {
-      humidityAlertActive = false;
-      humidityAlertMsg = "";
-      digitalWrite(NE555_CTRL_PIN, LOW);      // Desactivar oscilador NE555 -> LEDs apagados
-      Serial.println("NE555 DESACTIVADO - Humedad normal");
+  // Procesar alerta específica de luminosidad (controla el oscilador NE555)
+  if (data.indexOf("LUMINOSITY_ALERT") >= 0) {
+    if (data.indexOf("LUMINOSITY_ALERT ON") >= 0) {
+      luminosityAlertActive = true;
+      luminosityAlertMsg = data.substring(20); // Extraer datos después de "LUMINOSITY_ALERT ON "
+      digitalWrite(NE555_CTRL_PIN, HIGH);       // Activar oscilador NE555 -> LEDs parpadean alternados
+      Serial.println("Alerta de luminosidad");
+    } else if (data.indexOf("LUMINOSITY_ALERT OFF") >= 0) {
+      luminosityAlertActive = false;
+      luminosityAlertMsg = "";
+      digitalWrite(NE555_CTRL_PIN, LOW);        // Desactivar oscilador NE555 -> LEDs apagados
+      Serial.println("Luminosidad normal");
     }
     alert = data;
     alertTime = millis();
@@ -384,8 +405,9 @@ void measure() {
     measureTime = millis();
     temp = readTemperatura();
     humi = readHumedad();
+    lumi = readLuminosidad();
     // Siempre envía (los datos simulados ya son válidos)
-    sendSensorData(temp, humi);
+    sendSensorData(temp, humi, lumi);
   }
 }
 
@@ -421,11 +443,7 @@ void loop() {
   displayMeasures();
   displayMessage(message);
 
-  // Mostrar estado del oscilador NE555 en la pantalla
-  if (humidityAlertActive) {
-    display.setTextSize(1);
-    display.println("[!] HUM ALERT - LEDs");
-  }
+  
 
   display.display();
 }

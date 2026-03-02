@@ -67,41 +67,41 @@ def analyze_data():
     print(alerts, "alertas enviadas")
 
 
-def analyze_humidity_event():
+def analyze_luminosity_event():
     """
-    Nuevo evento de humedad: Evalúa la humedad promedio de la última hora.
+    Evento de luminosidad: Evalúa la luminosidad promedio de la última hora.
 
     Pre-requisito (consulta a la BD):
-        Se consulta la tabla Data filtrando por measurement.name == 'humedad'
+        Se consulta la tabla Data filtrando por measurement.name == 'luminosidad'
         en la última hora, agrupando por estación, y se calcula el promedio
-        (humedad_promedio) mediante una agregación Avg sobre avg_value.
+        (luminosidad_promedio) mediante una agregación Avg sobre avg_value.
 
     Condición:
-        Si humedad_promedio > max_value o humedad_promedio < min_value
-        (umbrales configurados en la tabla Measurement para 'humedad'),
+        Si luminosidad_promedio > max_value o luminosidad_promedio < min_value
+        (umbrales configurados en la tabla Measurement para 'luminosidad'),
         se considera que hay una alerta.
 
     Acción:
-        Se envía un mensaje MQTT "HUMIDITY_ALERT ON <promedio> <min> <max>"
+        Se envía un mensaje MQTT "LUMINOSITY_ALERT ON <promedio> <min> <max>"
         al dispositivo IoT. El MCU interpreta este comando y activa un pin
         GPIO que habilita un circuito oscilador NE555 conectado a dos LEDs,
         haciendo que parpadeen de forma alternada como indicador visual.
-        Cuando la condición deja de cumplirse, se envía "HUMIDITY_ALERT OFF"
+        Cuando la condición deja de cumplirse, se envía "LUMINOSITY_ALERT OFF"
         para desactivar el oscilador.
     """
-    print("Evaluando evento de humedad...")
+    print("Evaluando evento de luminosidad...")
 
-    # Pre-requisito: Verificar que existe la variable 'humedad' en la BD
-    humidity_measurements = Measurement.objects.filter(name__iexact='humedad')
+    # Pre-requisito: Verificar que existe la variable 'luminosidad' en la BD
+    lum_measurements = Measurement.objects.filter(name__iexact='luminosidad')
 
-    if not humidity_measurements.exists():
-        print("No se encontró la variable 'humedad' en la base de datos.")
+    if not lum_measurements.exists():
+        print("No se encontró la variable 'luminosidad' en la base de datos.")
         return
 
-    # Consulta a la BD: Obtener humedad promedio de la última hora por estación
-    humidity_data = Data.objects.filter(
+    # Consulta a la BD: Obtener luminosidad promedio de la última hora por estación
+    lum_data = Data.objects.filter(
         base_time__gte=timezone.now() - timedelta(hours=1),
-        measurement__in=humidity_measurements
+        measurement__in=lum_measurements
     ).select_related(
         'station', 'measurement',
         'station__user', 'station__location',
@@ -114,11 +114,11 @@ def analyze_humidity_event():
         'station__location__country__name',
         'measurement__min_value',
         'measurement__max_value',
-    ).annotate(humedad_promedio=Avg('avg_value'))
+    ).annotate(luminosidad_promedio=Avg('avg_value'))
 
     alerts = 0
-    for item in humidity_data:
-        humedad_promedio = item['humedad_promedio']
+    for item in lum_data:
+        luminosidad_promedio = item['luminosidad_promedio']
         max_value = item['measurement__max_value']
         min_value = item['measurement__min_value']
 
@@ -126,7 +126,7 @@ def analyze_humidity_event():
         if max_value is None and min_value is None:
             continue
 
-        max_value = max_value if max_value is not None else 100.0
+        max_value = max_value if max_value is not None else 1024.0
         min_value = min_value if min_value is not None else 0.0
 
         country = item['station__location__country__name']
@@ -135,23 +135,23 @@ def analyze_humidity_event():
         user = item['station__user__username']
         topic = '{}/{}/{}/{}/in'.format(country, state, city, user)
 
-        # Condición: humedad promedio fuera de rango
-        if humedad_promedio > max_value or humedad_promedio < min_value:
-            message = "HUMIDITY_ALERT ON {:.1f} {:.1f} {:.1f}".format(
-                humedad_promedio, min_value, max_value)
+        # Condición: luminosidad promedio fuera de rango
+        if luminosidad_promedio > max_value or luminosidad_promedio < min_value:
+            message = "LUMINOSITY_ALERT ON {:.1f} {:.1f} {:.1f}".format(
+                luminosidad_promedio, min_value, max_value)
             print(timezone.now(),
-                  "Alerta de humedad -> {} | Promedio: {:.1f}%".format(
-                      topic, humedad_promedio))
+                  "Alerta de luminosidad -> {} | Promedio: {:.1f} lx".format(
+                      topic, luminosidad_promedio))
             client.publish(topic, message)
             alerts += 1
         else:
-            # Desactivar el oscilador si la humedad está en rango normal
-            message = "HUMIDITY_ALERT OFF {:.1f}".format(humedad_promedio)
+            # Desactivar el oscilador si la luminosidad está en rango normal
+            message = "LUMINOSITY_ALERT OFF {:.1f}".format(luminosidad_promedio)
             client.publish(topic, message)
 
-    print("{} estaciones evaluadas para evento de humedad".format(
-        len(humidity_data)))
-    print("{} alertas de humedad enviadas".format(alerts))
+    print("{} estaciones evaluadas para evento de luminosidad".format(
+        len(lum_data)))
+    print("{} alertas de luminosidad enviadas".format(alerts))
 
 
 def on_connect(client, userdata, flags, rc):
@@ -203,8 +203,8 @@ def start_cron():
     '''
     print("Iniciando cron...")
     schedule.every(5).minutes.do(analyze_data)
-    schedule.every(5).minutes.do(analyze_humidity_event)
-    print("Servicio de control iniciado (alertas generales + evento de humedad)")
+    schedule.every(5).minutes.do(analyze_luminosity_event)
+    print("Servicio de control iniciado (alertas generales + evento de luminosidad)")
     while 1:
         schedule.run_pending()
         time.sleep(1)
