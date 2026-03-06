@@ -56,7 +56,7 @@ const char pass[] = "Isaac2023";
 
 // Conexión a Mosquitto
 #define USER "user1"
-const char MQTT_HOST[] = "34.238.235.55";
+const char MQTT_HOST[] = "52.201.232.117";
 const int MQTT_PORT = 8082;
 const char MQTT_CLIENT_ID[] = "MCU_user1";  // Client ID único para este dispositivo
 const char MQTT_USER[] = "user1";
